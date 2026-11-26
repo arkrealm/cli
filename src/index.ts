@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { downloadTemplate } from "giget";
-import { existsSync, readFileSync, cpSync, rmSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  cpSync,
+  rmSync,
+  mkdirSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import registry from "./registry.json" with { type: "json" };
 
@@ -12,13 +19,64 @@ type RegistryEntry = {
 
 type ModuleManifest = {
   name: string;
+  version?: string;
   files?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
-  env?: string[];
+  env?: Record<string, string> | string[];
+  postInstall?: string[];
 };
 
 const modules = registry as Record<string, RegistryEntry>;
+
+function mergePackageJson(targetRoot: string, manifest: ModuleManifest) {
+  const pkgPath = join(targetRoot, "package.json");
+  if (!existsSync(pkgPath)) return;
+
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  let updated = false;
+
+  if (manifest.dependencies && Object.keys(manifest.dependencies).length > 0) {
+    pkg.dependencies = { ...(pkg.dependencies ?? {}), ...manifest.dependencies };
+    updated = true;
+  }
+
+  if (manifest.devDependencies && Object.keys(manifest.devDependencies).length > 0) {
+    pkg.devDependencies = { ...(pkg.devDependencies ?? {}), ...manifest.devDependencies };
+    updated = true;
+  }
+
+  if (updated) {
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    console.log("  Updated package.json dependencies");
+  }
+}
+
+function mergeEnvExample(targetRoot: string, env?: Record<string, string> | string[]) {
+  if (!env) return;
+
+  const envPath = join(targetRoot, ".env.example");
+  const existing = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+  const lines = existing ? existing.split("\n") : [];
+
+  const entries: [string, string][] = Array.isArray(env)
+    ? env.map((k) => [k, ""])
+    : Object.entries(env);
+
+  let added = 0;
+  for (const [key, defaultVal] of entries) {
+    const alreadyExists = lines.some((line) => line.startsWith(`${key}=`));
+    if (!alreadyExists) {
+      lines.push(`${key}=${defaultVal}`);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    writeFileSync(envPath, lines.filter((l, i) => i < lines.length - 1 || l !== "").join("\n") + "\n");
+    console.log(`  Added ${added} variable(s) to .env.example`);
+  }
+}
 
 async function installModule(moduleName: string, targetRoot: string, token?: string) {
   const entry = modules[moduleName];
@@ -56,11 +114,16 @@ async function installModule(moduleName: string, targetRoot: string, token?: str
       }
     }
 
-    if (manifest.env?.length) {
-      console.log(`  Required env vars: ${manifest.env.join(", ")}`);
+    mergePackageJson(targetRoot, manifest);
+    mergeEnvExample(targetRoot, manifest.env);
+
+    if (manifest.postInstall?.length) {
+      console.log("\n  Next steps:");
+      for (const step of manifest.postInstall) {
+        console.log(`    - ${step}`);
+      }
     }
   } else {
-    // Fallback if repo has no module.manifest.json yet
     const destDir = join(targetRoot, "src/modules", moduleName);
     mkdirSync(destDir, { recursive: true });
     cpSync(tmpDir, destDir, { recursive: true });
