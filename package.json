@@ -1,6 +1,6 @@
 {
   "name": "arkrealm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ArkRealm modular full-stack starter kit CLI",
   "type": "module",
   "bin": {
