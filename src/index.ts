@@ -238,9 +238,7 @@ async function main() {
         `     cd ${join(dirArg, "auth-api-demo")} && docker compose up --build -d\n`,
       );
       console.log("  2. Start Next.js Frontend (http://localhost:3001):");
-      console.log(
-        `     cd ${join(dirArg, "auth-ui-demo")} && pnpm install && pnpm dev\n`,
-      );
+      console.log("     cd ../auth-ui-demo && pnpm install && pnpm dev\n");
       return;
     }
 
