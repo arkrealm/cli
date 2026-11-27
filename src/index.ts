@@ -5,6 +5,7 @@ import {
   readFileSync,
   writeFileSync,
   cpSync,
+  copyFileSync,
   rmSync,
   mkdirSync,
 } from "node:fs";
@@ -37,12 +38,21 @@ function mergePackageJson(targetRoot: string, manifest: ModuleManifest) {
   let updated = false;
 
   if (manifest.dependencies && Object.keys(manifest.dependencies).length > 0) {
-    pkg.dependencies = { ...(pkg.dependencies ?? {}), ...manifest.dependencies };
+    pkg.dependencies = {
+      ...(pkg.dependencies ?? {}),
+      ...manifest.dependencies,
+    };
     updated = true;
   }
 
-  if (manifest.devDependencies && Object.keys(manifest.devDependencies).length > 0) {
-    pkg.devDependencies = { ...(pkg.devDependencies ?? {}), ...manifest.devDependencies };
+  if (
+    manifest.devDependencies &&
+    Object.keys(manifest.devDependencies).length > 0
+  ) {
+    pkg.devDependencies = {
+      ...(pkg.devDependencies ?? {}),
+      ...manifest.devDependencies,
+    };
     updated = true;
   }
 
@@ -52,7 +62,10 @@ function mergePackageJson(targetRoot: string, manifest: ModuleManifest) {
   }
 }
 
-function mergeEnvExample(targetRoot: string, env?: Record<string, string> | string[]) {
+function mergeEnvExample(
+  targetRoot: string,
+  env?: Record<string, string> | string[],
+) {
   if (!env) return;
 
   const envPath = join(targetRoot, ".env.example");
@@ -73,19 +86,61 @@ function mergeEnvExample(targetRoot: string, env?: Record<string, string> | stri
   }
 
   if (added > 0) {
-    writeFileSync(envPath, lines.filter((l, i) => i < lines.length - 1 || l !== "").join("\n") + "\n");
+    writeFileSync(
+      envPath,
+      lines.filter((l, i) => i < lines.length - 1 || l !== "").join("\n") +
+        "\n",
+    );
     console.log(`  Added ${added} variable(s) to .env.example`);
   }
 }
 
-async function installModule(moduleName: string, targetRoot: string, token?: string) {
+async function scaffoldStandaloneApp(
+  moduleName: string,
+  workspaceRoot: string,
+  envTargetFile: ".env" | ".env.local",
+  token?: string,
+) {
   const entry = modules[moduleName];
   if (!entry) {
-    throw new Error(`Unknown module "${moduleName}". Available: ${Object.keys(modules).join(", ")}`);
+    throw new Error(`Unknown module "${moduleName}".`);
+  }
+
+  const destDir = join(workspaceRoot, moduleName);
+  console.log(`Downloading ${moduleName} (${entry.repo})...`);
+
+  await downloadTemplate(entry.repo, {
+    dir: destDir,
+    force: true,
+    auth: entry.tier === "paid" ? token : undefined,
+  });
+
+  const envExample = join(destDir, ".env.example");
+  const envDest = join(destDir, envTargetFile);
+  if (existsSync(envExample) && !existsSync(envDest)) {
+    copyFileSync(envExample, envDest);
+    console.log(`  Created ${moduleName}/${envTargetFile} from .env.example`);
+  }
+
+  console.log(`Done: ${moduleName}\n`);
+}
+
+async function installModule(
+  moduleName: string,
+  targetRoot: string,
+  token?: string,
+) {
+  const entry = modules[moduleName];
+  if (!entry) {
+    throw new Error(
+      `Unknown module "${moduleName}". Available: ${Object.keys(modules).join(", ")}`,
+    );
   }
 
   if (entry.tier === "paid" && !token) {
-    throw new Error(`"${moduleName}" is a paid module. Pass --token <github_pat> or set ARKREALM_GITHUB_TOKEN.`);
+    throw new Error(
+      `"${moduleName}" is a paid module. Pass --token <github_pat> or set ARKREALM_GITHUB_TOKEN.`,
+    );
   }
 
   const tmpDir = join(targetRoot, ".arkrealm-tmp", moduleName);
@@ -99,7 +154,9 @@ async function installModule(moduleName: string, targetRoot: string, token?: str
 
   const manifestPath = join(tmpDir, "module.manifest.json");
   if (existsSync(manifestPath)) {
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as ModuleManifest;
+    const manifest = JSON.parse(
+      readFileSync(manifestPath, "utf-8"),
+    ) as ModuleManifest;
     console.log(`Applying manifest for ${manifest.name}...`);
 
     if (manifest.files) {
@@ -142,7 +199,8 @@ function getFlagValue(args: string[], flag: string): string | undefined {
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
-  const token = getFlagValue(args, "--token") ?? process.env.ARKREALM_GITHUB_TOKEN;
+  const token =
+    getFlagValue(args, "--token") ?? process.env.ARKREALM_GITHUB_TOKEN;
 
   if (command === "add") {
     const moduleName = args[1];
@@ -161,9 +219,28 @@ async function main() {
     mkdirSync(targetRoot, { recursive: true });
 
     if (isLite) {
-      console.log(`Initializing ArkRealm Lite stack in ${targetRoot}...\n`);
-      await installModule("auth-api-demo", targetRoot, token);
-      console.log("Lite stack ready.");
+      console.log(
+        `Initializing ArkRealm Lite full-stack demo in ${targetRoot}...\n`,
+      );
+      await scaffoldStandaloneApp("auth-api-demo", targetRoot, ".env", token);
+      await scaffoldStandaloneApp(
+        "auth-ui-demo",
+        targetRoot,
+        ".env.local",
+        token,
+      );
+
+      console.log(
+        "ArkRealm Lite stack ready! Run both apps in separate terminals:\n",
+      );
+      console.log("  1. Start Backend API (http://localhost:3000):");
+      console.log(
+        `     cd ${join(dirArg, "auth-api-demo")} && docker compose up --build -d\n`,
+      );
+      console.log("  2. Start Next.js Frontend (http://localhost:3001):");
+      console.log(
+        `     cd ${join(dirArg, "auth-ui-demo")} && pnpm install && pnpm dev\n`,
+      );
       return;
     }
 
@@ -173,8 +250,12 @@ async function main() {
 
   console.log("ArkRealm CLI\n");
   console.log("Commands:");
-  console.log("  arkrealm init [dir] --lite       Scaffold free demo stack");
-  console.log("  arkrealm add <module> [--token]  Add a module to current project");
+  console.log(
+    "  arkrealm init [dir] --lite       Scaffold free full-stack demo (API + UI)",
+  );
+  console.log(
+    "  arkrealm add <module> [--token]  Add a module to current project",
+  );
   console.log("\nAvailable modules:", Object.keys(modules).join(", "));
 }
 
