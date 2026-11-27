@@ -2,12 +2,14 @@
   "auth-api-demo": {
     "repo": "github:arkrealm/auth-api-demo",
     "tier": "free",
-    "description": "Free authentication API demo module"
+    "standalone": true,
+    "description": "Free authentication API demo"
   },
   "auth-ui-demo": {
     "repo": "github:arkrealm/auth-ui-demo",
     "tier": "free",
-    "description": "Free Next.js authentication UI demo module"
+    "standalone": true,
+    "description": "Free Next.js authentication UI demo"
   },
   "auth-api": {
     "repo": "github:arkrealm/auth-api",

@@ -15,6 +15,7 @@ import registry from "./registry.json" with { type: "json" };
 type RegistryEntry = {
   repo: string;
   tier: "free" | "paid";
+  standalone?: boolean;
   description: string;
 };
 
@@ -137,6 +138,12 @@ async function installModule(
     );
   }
 
+  if (entry.standalone) {
+    throw new Error(
+      `"${moduleName}" is a standalone demo template, not an injectable module. Run "arkrealm init <dir> --lite" instead.`,
+    );
+  }
+
   if (entry.tier === "paid" && !token) {
     throw new Error(
       `"${moduleName}" is a paid module. Pass --token <github_pat> or set ARKREALM_GITHUB_TOKEN.`,
@@ -146,14 +153,20 @@ async function installModule(
   const tmpDir = join(targetRoot, ".arkrealm-tmp", moduleName);
   console.log(`Downloading ${moduleName} (${entry.repo})...`);
 
-  await downloadTemplate(entry.repo, {
-    dir: tmpDir,
-    force: true,
-    auth: entry.tier === "paid" ? token : undefined,
-  });
+  try {
+    await downloadTemplate(entry.repo, {
+      dir: tmpDir,
+      force: true,
+      auth: entry.tier === "paid" ? token : undefined,
+    });
 
-  const manifestPath = join(tmpDir, "module.manifest.json");
-  if (existsSync(manifestPath)) {
+    const manifestPath = join(tmpDir, "module.manifest.json");
+    if (!existsSync(manifestPath)) {
+      throw new Error(
+        `"${moduleName}" is a standalone template, not an injectable module. Run "arkrealm init <dir> --lite" instead.`,
+      );
+    }
+
     const manifest = JSON.parse(
       readFileSync(manifestPath, "utf-8"),
     ) as ModuleManifest;
@@ -180,15 +193,11 @@ async function installModule(
         console.log(`    - ${step}`);
       }
     }
-  } else {
-    const destDir = join(targetRoot, "src/modules", moduleName);
-    mkdirSync(destDir, { recursive: true });
-    cpSync(tmpDir, destDir, { recursive: true });
-    console.log(`  Copied files to src/modules/${moduleName}`);
-  }
 
-  rmSync(join(targetRoot, ".arkrealm-tmp"), { recursive: true, force: true });
-  console.log(`Done: ${moduleName}\n`);
+    console.log(`Done: ${moduleName}\n`);
+  } finally {
+    rmSync(join(targetRoot, ".arkrealm-tmp"), { recursive: true, force: true });
+  }
 }
 
 function getFlagValue(args: string[], flag: string): string | undefined {
@@ -230,10 +239,10 @@ async function main() {
         token,
       );
 
+      console.log("ArkRealm Lite stack ready! Run these commands to start:\n");
       console.log(
-        "ArkRealm Lite stack ready! Run both apps in separate terminals:\n",
+        "  1. Start Backend API in background (http://localhost:3000):",
       );
-      console.log("  1. Start Backend API (http://localhost:3000):");
       console.log(
         `     cd ${join(dirArg, "auth-api-demo")} && docker compose up --build -d\n`,
       );
